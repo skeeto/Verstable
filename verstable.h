@@ -485,6 +485,23 @@ static inline int vt_first_nonzero_uint16( uint64_t val )
 // at a time, never read beyond the end of it.
 static const uint16_t vt_placeholder_metadata_buffer[ 4 ] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
 
+// Default allocation functions:
+
+#ifndef MALLOC_FN
+static inline void *vt_malloc( size_t size, void *arg )
+{
+  (void)arg;
+  return malloc( size );
+}
+
+static inline void vt_free( void *p, size_t size, void *arg )
+{
+  (void)size;
+  (void)arg;
+  free( p );
+}
+#endif
+
 // Default hash and comparison functions:
 
 static inline uint64_t vt_hash_integer( uint64_t key )
@@ -650,6 +667,7 @@ typedef struct
                       // an 11-bit value indicating the quadratic displacement of the next key in the chain (Z):
                       // XXXXYZZZZZZZZZZZ.
   VT_CAT( NAME, _bucket ) *buckets;
+  void *alloc_arg;
 } NAME;
 
 #endif
@@ -751,11 +769,11 @@ VT_CAT( NAME, _itr ) VT_CAT( NAME, _erase_itr )( NAME *table, VT_CAT( NAME, _itr
 #endif
 
 #ifndef MALLOC_FN
-#define MALLOC_FN malloc
+#define MALLOC_FN vt_malloc
 #endif
 
 #ifndef FREE_FN
-#define FREE_FN free
+#define FREE_FN vt_free
 #endif
 
 #ifndef HASH_FN
@@ -782,12 +800,14 @@ VT_API_FN_QUALIFIERS void VT_CAT( NAME, _init )( NAME *table )
   table->bucket_count = 0;
   table->metadata = (uint16_t *)vt_placeholder_metadata_buffer;
   table->buckets = NULL;
+  table->alloc_arg = NULL;
 }
 
 VT_API_FN_QUALIFIERS bool VT_CAT( NAME, _init_clone )( NAME *table, NAME *source )
 {
   table->key_count = source->key_count;
   table->bucket_count = source->bucket_count;
+  table->alloc_arg = source->alloc_arg;
 
   if( source->bucket_count == 0 )
   {
@@ -796,13 +816,13 @@ VT_API_FN_QUALIFIERS bool VT_CAT( NAME, _init_clone )( NAME *table, NAME *source
     return true;
   }
 
-  table->metadata = (uint16_t *)MALLOC_FN( ( table->bucket_count + 4 ) * sizeof( uint16_t ) );
-  table->buckets = (VT_CAT( NAME, _bucket ) *)MALLOC_FN( table->bucket_count * sizeof( VT_CAT( NAME, _bucket ) ) );
+  table->metadata = (uint16_t *)MALLOC_FN( ( table->bucket_count + 4 ) * sizeof( uint16_t ), table->alloc_arg );
+  table->buckets = (VT_CAT( NAME, _bucket ) *)MALLOC_FN( table->bucket_count * sizeof( VT_CAT( NAME, _bucket ) ), table->alloc_arg );
 
   if( !table->metadata || !table->buckets )
   {
-    FREE_FN( table->metadata );
-    FREE_FN( table->buckets );
+    FREE_FN( table->metadata, ( table->bucket_count + 4 ) * sizeof( uint16_t ), table->alloc_arg );
+    FREE_FN( table->buckets, table->bucket_count * sizeof( VT_CAT( NAME, _bucket ) ), table->alloc_arg );
     return false;
   }
 
@@ -1083,14 +1103,15 @@ static inline bool VT_CAT( NAME, _rehash )( NAME *table, size_t bucket_count )
     NAME new_table = {
       0,
       bucket_count,
-      (uint16_t *)MALLOC_FN( ( bucket_count + 4 ) * sizeof( uint16_t ) ),
-      (VT_CAT( NAME, _bucket ) *)MALLOC_FN( bucket_count * sizeof( VT_CAT( NAME, _bucket ) ) )
+      (uint16_t *)MALLOC_FN( ( bucket_count + 4 ) * sizeof( uint16_t ), table->alloc_arg ),
+      (VT_CAT( NAME, _bucket ) *)MALLOC_FN( bucket_count * sizeof( VT_CAT( NAME, _bucket ) ), table->alloc_arg ),
+      table->alloc_arg,
     };
 
     if( !new_table.metadata || !new_table.buckets )
     {
-      FREE_FN( new_table.metadata );
-      FREE_FN( new_table.buckets );
+      FREE_FN( new_table.metadata, ( new_table.bucket_count + 4 ) * sizeof( uint16_t ), new_table.alloc_arg );
+      FREE_FN( new_table.buckets, new_table.bucket_count * sizeof( VT_CAT( NAME, _bucket ) ), new_table.alloc_arg );
       return false;
     }
 
@@ -1117,8 +1138,8 @@ static inline bool VT_CAT( NAME, _rehash )( NAME *table, size_t bucket_count )
 
         if( VT_CAT( NAME, _is_end )( itr ) )
         {
-          FREE_FN( new_table.metadata );
-          FREE_FN( new_table.buckets );
+          FREE_FN( new_table.metadata, ( new_table.bucket_count + 4 ) * sizeof( uint16_t ), new_table.alloc_arg );
+          FREE_FN( new_table.buckets, new_table.bucket_count * sizeof( VT_CAT( NAME, _bucket ) ), new_table.alloc_arg );
           bucket_count *= 2;
           continue;
         }
@@ -1126,8 +1147,8 @@ static inline bool VT_CAT( NAME, _rehash )( NAME *table, size_t bucket_count )
 
     if( table->bucket_count )
     {
-      FREE_FN( table->metadata );
-      FREE_FN( table->buckets );
+      FREE_FN( table->metadata, ( table->bucket_count + 4 ) * sizeof( uint16_t ), table->alloc_arg );
+      FREE_FN( table->buckets, table->bucket_count * sizeof( VT_CAT( NAME, _bucket ) ), table->alloc_arg );
     }
 
     *table = new_table;
@@ -1406,8 +1427,8 @@ VT_API_FN_QUALIFIERS bool VT_CAT( NAME, _shrink )( NAME *table )
 
   if( bucket_count == 0 )
   {
-    FREE_FN( table->metadata );
-    FREE_FN( table->buckets );
+    FREE_FN( table->metadata, ( table->bucket_count + 4 ) * sizeof( uint16_t ), table->alloc_arg );
+    FREE_FN( table->buckets, table->bucket_count * sizeof( VT_CAT( NAME, _bucket ) ), table->alloc_arg );
     table->bucket_count = 0;
     table->metadata = (uint16_t *)vt_placeholder_metadata_buffer;
     return true;
@@ -1452,8 +1473,8 @@ VT_API_FN_QUALIFIERS void VT_CAT( NAME, _cleanup )( NAME *table )
   VT_CAT( NAME, _clear )( table );
   #endif
 
-  FREE_FN( table->metadata );
-  FREE_FN( table->buckets );
+  FREE_FN( table->metadata, ( table->bucket_count + 4 ) * sizeof( uint16_t ), table->alloc_arg );
+  FREE_FN( table->buckets, table->bucket_count * sizeof( VT_CAT( NAME, _bucket ) ), table->alloc_arg );
   VT_CAT( NAME, _init )( table );
 }
 

@@ -55,8 +55,10 @@ SOFTWARE.
 size_t simulated_alloc_failures = 0;
 size_t oustanding_allocs = 0;
 
-void *unreliable_tracking_malloc( size_t size )
+void *unreliable_tracking_malloc( size_t size, void *arg )
 {
+  (void)arg;
+
 #ifdef SIMULATE_ALLOC_FAILURES
   if( rand() % 5 == 0 )
   {
@@ -73,8 +75,11 @@ void *unreliable_tracking_malloc( size_t size )
   return ptr;
 }
 
-void tracking_free( void *ptr )
+void tracking_free( void *ptr, size_t size, void *arg )
 {
+  (void)size;
+  (void)arg;
+
   if( ptr )
     --oustanding_allocs;
 
