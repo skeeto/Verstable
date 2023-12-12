@@ -11,12 +11,13 @@ static void arena_free(void *p, size_t size, void *arg)
 {
     char **arena = arg;
     if (p == *arena) {
-        *arena += -size & 15;
+        size += -size & 15;
+        *arena += size;
     }
 }
 
-#define NAME int_set
-#define KEY_TY int
+#define NAME str_set
+#define KEY_TY char *
 #define MALLOC_FN arena_alloc
 #define FREE_FN arena_free
 #include "verstable.h"
@@ -28,23 +29,27 @@ int main(void)
 
     {
         char *scratch = arena;
-        int_set set;
+        str_set set;
         vt_init(&set);
         set.alloc_arg = &scratch;
         int n = 50;
 
         for (int i = 0; i < n; i++) {
-            vt_insert(&set, i);
+            char *key = arena_alloc(16, &scratch);
+            sprintf(key, "%d", i);
+            vt_insert(&set, key);
         }
 
         for (int i = 0; i < n; i += 2) {
-            vt_erase(&set, i);
+            char key[16];
+            sprintf(key, "%d", i);
+            vt_erase(&set, key);
         }
 
-        int_set clone;
+        str_set clone;
         vt_init_clone(&clone, &set);
-        for (int_set_itr i = vt_first(&clone); !vt_is_end(i); i = vt_next(i)) {
-            printf("%d\n", i.data->key);
+        for (str_set_itr i = vt_first(&clone); !vt_is_end(i); i = vt_next(i)) {
+            printf("%s\n", i.data->key);
         }
     }
 }
